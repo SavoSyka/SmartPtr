@@ -1,9 +1,9 @@
-#include <iostream>
+#include<iostream>
 
 template <class T>
 class UniquePtr {
 public:
-    UniquePtr() : ptr(nullptr) {}
+    UniquePtr(): ptr(nullptr) { }
     UniquePtr(const UniquePtr& o) = delete;
     UniquePtr& operator=(const UniquePtr& o) = delete;
 
@@ -13,22 +13,22 @@ public:
     }
 
     UniquePtr& operator=(UniquePtr&& o) {
-        if (&o == this) {
+        if(this==std::addressof(o)){
             return *this;
         }
         delete ptr;
-        ptr = o.ptr;
-        o.ptr = nullptr;
+        UniquePtr tmp = UniquePtr(std::move(o));
+        std::swap(this->ptr, tmp.ptr);
         return *this;
     }
 
-    UniquePtr(T* p) : ptr(p) {}
+    UniquePtr(T* p): ptr(p) {}
 
-    T* operator->() { return ptr; }
+    T* operator->() {  return ptr; }
 
-    T& operator*() { return *ptr; }
+    T& operator*() {  return *ptr; }
 
-    ~UniquePtr() { delete ptr; }
+    ~UniquePtr() {  delete ptr;  }
 
 private:
     T* ptr;
@@ -47,43 +47,71 @@ template <class T>
 class SharedPtr {
     friend class WeakPtr<T>;
 public:
-    SharedPtr() : ptr(nullptr), counter(nullptr) {}
-    SharedPtr(const SharedPtr& o) : ptr(o.ptr), counter(o.counter) { if (counter) ++counter->strong; }
-    SharedPtr& operator=(const SharedPtr& o) {
-        if (this != &o) {
-            this->~SharedPtr();
+    SharedPtr():ptr(nullptr), counter(nullptr) {  }
+    SharedPtr(const SharedPtr& o) {
+        if(o.counter==nullptr){
+            ptr = o.ptr;
+            counter = nullptr;
+        }else{
             ptr = o.ptr;
             counter = o.counter;
-            if (counter) ++counter->strong;
+            (counter->strong)++;
+        }
+    }
+    SharedPtr& operator=(const SharedPtr& o) {
+        if(this==std::addressof(o)){
+            return *this;
+        }else{
+            SharedPtr<T> tmp(o);
+            std::swap(this->ptr, tmp.ptr);
+            std::swap(this->counter, tmp.counter);
         }
         return *this;
     }
 
-    SharedPtr(SharedPtr&& o) : ptr(o.ptr), counter(o.counter) {
+    SharedPtr(SharedPtr&& o) {
+        ptr = o.ptr;
+        counter = o.counter;
         o.ptr = nullptr;
         o.counter = nullptr;
     }
 
     SharedPtr& operator=(SharedPtr&& o) {
-        if (this != &o) {
-            this->~SharedPtr();
-            ptr = o.ptr;
-            counter = o.counter;
-            o.ptr = nullptr;
-            o.counter = nullptr;
+        if(this==std::addressof(o)){
+            return *this;
         }
+
+        (*this).~SharedPtr();
+        SharedPtr<T> tmp(std::move(o));
+        std::swap(this->ptr, tmp.ptr);
+        std::swap(this->counter, tmp.counter);
+
         return *this;
     }
 
-    SharedPtr(T* p) : ptr(p), counter(new RefCntBlock{1, 0}) {}
-
-    SharedPtr(const WeakPtr<T>& o) : ptr(o.ptr), counter(o.counter) {
-        if (counter) ++counter->strong;
+    SharedPtr(T* p)  {
+        ptr = p;
+        if (p!=nullptr) {
+            counter = new RefCntBlock{1, 0};
+        } else {
+            counter = nullptr;
+        }
     }
 
+
+    SharedPtr(const WeakPtr<T>& o);
+
+
     void Reset() {
-        this->~SharedPtr();
         ptr = nullptr;
+        if (counter) {
+            if (--counter->strong == 0) {
+                delete ptr;
+                if (counter->weak == 0) {
+                    delete counter;
+                }
+            }
+        }
         counter = nullptr;
     }
 
@@ -92,12 +120,13 @@ public:
     T& operator*() { return *ptr; }
 
     ~SharedPtr () {
-        if (counter) {
-            if (--counter->strong == 0) {
+        if (counter!=nullptr) {
+            if (counter->strong - 1 == 0) {
                 delete ptr;
-                if (counter->weak == 0) {
-                    delete counter;
-                }
+                --counter->strong;
+                if (counter->weak == 0) delete counter;
+            }else{
+                --counter->strong;
             }
         }
     }
@@ -111,47 +140,78 @@ template <class T>
 class WeakPtr {
     friend class SharedPtr<T>;
 public:
-    WeakPtr() : ptr(nullptr), counter(nullptr) {}
-    WeakPtr(const WeakPtr& o) : ptr(o.ptr), counter(o.counter) { if (counter) ++counter->weak; }
+    WeakPtr() : ptr(nullptr), counter(nullptr) { }
+
+    WeakPtr(const WeakPtr& o) : ptr(o.ptr), counter(o.counter) {
+        ptr = o.ptr;
+        counter = o.counter;
+        if (counter != nullptr) {
+            ++counter->weak;
+        }
+    }
+
     WeakPtr& operator=(const WeakPtr& o) {
-        if (this != &o) {
-            this->~WeakPtr();
-            ptr = o.ptr;
-            counter = o.counter;
-            if (counter) ++counter->weak;
+        if(this==std::addressof(o)){
+            return *this;
+        }else{
+            WeakPtr<T> tmp(o);
+            std::swap(this->ptr, tmp.ptr);
+            std::swap(this->counter, tmp.counter);
         }
         return *this;
     }
 
-    WeakPtr(WeakPtr&& o) : ptr(o.ptr), counter(o.counter) {
+    WeakPtr(WeakPtr&& o)  {
+        ptr = o.ptr;
+        counter = o.counter;
         o.ptr = nullptr;
         o.counter = nullptr;
     }
 
     WeakPtr& operator=(WeakPtr&& o) {
-        if (this != &o) {
-            this->~WeakPtr();
-            ptr = o.ptr;
-            counter = o.counter;
-            o.ptr = nullptr;
-            o.counter = nullptr;
+        if(this==std::addressof(o)){
+            return *this;
+        }
+
+        (*this).~WeakPtr();
+        WeakPtr<T> tmp(std::move(o));
+        std::swap(this->ptr, tmp.ptr);
+        std::swap(this->counter, tmp.counter);
+
+        return *this;
+    }
+
+    WeakPtr(const SharedPtr<T>& o){
+        ptr = o.ptr;
+        counter = o.counter;
+        if (counter!=nullptr){
+            (counter->weak)++;
+        }
+    }
+
+    WeakPtr& operator=(const SharedPtr<T>& o) {
+        (*this).~WeakPtr();
+
+        ptr = o.ptr;
+        counter = o.counter;
+
+        if (counter!=nullptr){
+            (counter->weak)++;
         }
         return *this;
     }
 
-    WeakPtr(const SharedPtr<T>& o) : ptr(o.ptr), counter(o.counter) { if (counter) ++counter->weak; }
-
-    WeakPtr& operator=(const SharedPtr<T>& o) {
-        this->~WeakPtr();
-        ptr = o.ptr;
-        counter = o.counter;
-        if (counter) ++counter->weak;
-        return *this;
-    }
 
     void Reset() {
-        this->~WeakPtr();
         ptr = nullptr;
+        if (counter) {
+            if (--counter->strong == 0) {
+                delete ptr;
+                if (counter->weak == 0) {
+                    delete counter;
+                }
+            }
+        }
         counter = nullptr;
     }
 
@@ -160,8 +220,11 @@ public:
     SharedPtr<T> Lock() { return Expired() ? SharedPtr<T>() : SharedPtr<T>(*this); }
 
     ~WeakPtr () {
-        if (counter && --counter->weak == 0 && counter->strong == 0) {
-            delete counter;
+        if (counter !=nullptr){
+            counter->weak--;
+            if(counter->weak==0 && counter->strong==0){
+                delete counter;
+            }
         }
     }
 
@@ -170,3 +233,13 @@ private:
     RefCntBlock* counter;
 };
 
+template <class T>
+SharedPtr<T>::SharedPtr(const WeakPtr<T>& o){
+
+    ptr = o.ptr;
+    counter = o.counter;
+
+    if (counter!=nullptr) {
+        ++counter->strong;
+    }
+}
